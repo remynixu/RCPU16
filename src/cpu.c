@@ -1,11 +1,21 @@
 #include "cpu.h"
 
+#include <stdio.h>
+
 
 
 static struct cpu_state cpu;
- 
-struct cpu_state cpu_get(void){
-    return cpu;
+
+void cpu_printstate(void){
+    int i;
+    for(i = 0; i < CPU_REGISTER_COUNT; i++){
+        printf("r[%d] = %d \t", i, cpu.r[i]);
+    }
+    putchar('\n');
+    printf("pc = %d    \t", cpu.pc);
+    printf("sp = %d \t", cpu.sp);
+    printf("flags = %d \t", cpu.flags);
+    printf("hz = %d\n", cpu.clock_hz);
 }
 
 
@@ -38,35 +48,20 @@ static uint16_t instr_fetch(void){
     return to_big_endian16(ram.memory[cpu.pc], ram.memory[cpu.pc + 1]);
 }
 
-/*
- * An intruction is expected to be structured like this:
- *
- * 0000   | 0000 0000 0000
- * opcode | operands
- * 
- * opcodes starting from 0000:
- * 
- * NOP [0x0] [0x0] [0x0]
- * JMP [REG] [0x0] [0x0]
- * LDR [REG] [HEX] [HEX]
- * LDM [MOD] [REG] [REG] 
- *
- * Note: REG, HEX, and MOD are all 0x0–0xf, but REG refers to the register to
- *       use; HEX refers to a constant number.
- */
-
 #define OPERAND_AMOUNT  3
 
 #define INSTR_FN_ARGS   byte opr0, byte opr1, byte opr2
-#define INSTR_FN(name)  void name (INSTR_FN_ARGS)
+#define INSTR_FN(name)  int name (INSTR_FN_ARGS)
 
-typedef void (*instr_fn)(INSTR_FN_ARGS);
+/* The cycle counts we return are fake and simulated... */
+typedef INSTR_FN((*instr_fn));
 
 /* Nothing to do... */
 INSTR_FN(handle_nop){
     (void)opr0;
     (void)opr1;
     (void)opr2;
+    return 1;
 }
 
 /* Blindly expect the specified register to have a valid 16-bit aligned address. */
@@ -74,58 +69,65 @@ INSTR_FN(handle_jmp){
     (void)opr1;
     (void)opr2;
     cpu.pc = cpu.r[opr0];
+    return 1;
 }
 
 /*
- * Loads a byte ((opr1 << 4) | opr2) to a chosen register (opr0):
+ * Loads a byte ((opr1 << 4) | opr2) to the upper 8 bits of a chosen
+ * register (opr0):
  */
-INSTR_FN(handle_ldr){
-    cpu.r[opr0] = (opr1 << 4) | opr2;
+INSTR_FN(handle_ldu){
+    cpu.r[opr0] = (uint16_t)((opr1 << 4) | opr2) << 8;
+    return 1;
 }
 
 /*
- * Loads from or to a pointer or register.
- * [The '*' means dereference; load uses the value in oprn as a memory address]
+ * Loads a byte ((opr1 << 4) | opr2) to the lower 8 bits of a chosen
+ * register (opr0):
+ */
+INSTR_FN(handle_ldl){
+    cpu.r[opr0] = (uint16_t)((opr1 << 4) | opr2);
+    return 1;
+}
+
+/*
  * - 0x0 - load *opr1 (reg) ->  opr2 (reg)
  * - 0x1 - load  opr1 (reg) -> *opr2 (reg)
  * - 0x2 - load *opr1 (reg) -> *opr2 (reg)
  * - 0x3 - load  opr1 (reg) ->  opr2 (reg)
- *
  */
 INSTR_FN(handle_ldm){
     switch(opr0){
-        case 0x0:{
-            cpu.r[opr2] = ram.memory[cpu.r[opr1]];
-            break;
-        }
-        case 0x1:{
-            ram.memory[cpu.r[opr2]] = cpu.r[opr1];
-            break;
-        }
-        case 0x2:{
-            ram.memory[cpu.r[opr2]] = ram.memory[cpu.r[opr1]];
-            break;
-        }
-        case 0x3:{
-            cpu.r[opr2] = cpu.r[opr1];
-            break;
-        }
-        default:{
-            /* THIS IS AN INVALID OPCODE! WE MUST DIE! */
-            break;
-        }
+    case 0x0:
+        cpu.r[opr2] = ram.memory[cpu.r[opr1]];
+        break;
+    case 0x1:
+        ram.memory[cpu.r[opr2]] = cpu.r[opr1];
+        break;
+    case 0x2:
+        ram.memory[cpu.r[opr2]] = ram.memory[cpu.r[opr1]];
+        break;
+    case 0x3:
+        cpu.r[opr2] = cpu.r[opr1];
+        break;
+    default:
+        /* THIS IS AN INVALID OPCODE! WE MUST DIE! */
+        cpu.pc = ram.size * 2;
+        break;
     }
+    return 2;
 }
 
 instr_fn dispatch_table[16] = {
     handle_nop,
     handle_jmp,
+    handle_ldu,
+    handle_ldl,
     handle_ldm,
-    handle_ldr,
     NULL
 };
 
-static void instr_decode(uint16_t instr){
+static int instr_decode(uint16_t instr){
     byte opc;
     byte opr[OPERAND_AMOUNT];
     opc     = (instr >> 12) & 0xf;
@@ -137,18 +139,29 @@ static void instr_decode(uint16_t instr){
 
 
 
-static void cpu_init(struct cpu_config *config){
-    ram.memory  = config->ram;
-    ram.size    = config->ram_size;
-    cpu.flags   = 0;
-    cpu.pc      = 0;
-    cpu.sp      = UINT16_MAX;
+void cpu_init(struct cpu_config *config){
+    ram.memory   = config->ram;
+    ram.size     = config->ram_size;
+    cpu.flags    = 0;
+    cpu.pc       = 0;
+    cpu.sp       = UINT16_MAX;
+    cpu.clock_hz = config->clock_hz;
 }
 
-void cpu_start(struct cpu_config *config){
-    cpu_init(config);
-    while(1){
-        instr_decode(instr_fetch());
-        pc_increment();
+#include <time.h>
+
+static void delay_microseconds(int microseconds){
+    clock_t target_ticks = clock() + (clock_t)((float)microseconds * ((float)CLOCKS_PER_SEC / (float)MHZ));
+    while(clock() < target_ticks){
+        volatile int __no_optimize = microseconds;
     }
+}
+
+static void cycle_delay(int cycles_spent){
+    delay_microseconds(cycles_spent * cpu_microseconds_per_cycle(cpu.clock_hz));
+}
+
+void cpu_cycle(void){
+    cycle_delay(instr_decode(instr_fetch()));
+    pc_increment();
 }
