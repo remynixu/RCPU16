@@ -20,6 +20,11 @@ void cpu_printstate(void){
 
 
 
+#define CPU_FLAGS_DBZ   (1 << 0)
+#define CPU_FLAGS_INT   (1 << 1)
+
+
+
 /*
  * The current architecture of this CPU, the RCPU, is 16-bit RISC Big-endian.
  *
@@ -47,6 +52,8 @@ static struct{
 static uint16_t instr_fetch(void){
     return to_big_endian16(ram.memory[cpu.pc], ram.memory[cpu.pc + 1]);
 }
+
+
 
 #define OPERAND_AMOUNT  3
 
@@ -134,7 +141,7 @@ static int instr_decode(uint16_t instr){
     opr[0]  = (instr >> 8) & 0xf;
     opr[1]  = (instr >> 4) & 0xf;
     opr[2]  = instr & 0xf;
-    dispatch_table[opc](opr[0], opr[1], opr[2]);
+    return dispatch_table[opc](opr[0], opr[1], opr[2]);
 }
 
 
