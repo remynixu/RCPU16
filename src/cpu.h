@@ -34,24 +34,56 @@ typedef uint8_t byte;
  *                          ; 0x1 - load  opr1 (reg) -> *opr2 (reg)
  *                          ; 0x2 - load *opr1 (reg) -> *opr2 (reg)
  *                          ; 0x3 - load  opr1 (reg) ->  opr2 (reg)
+ * IRQ [0x0] [0x0] [0x0]    ; Calls an 'interrupt' function that automatically 
+ *                          ; invokes arguments like so:
+ *                          ; r3 irq[r0](r1, r2)
  *
  * Note: REG, HEX, and MOD are all 0x0–0xf, but REG refers to the register to
  *       use; MOD and HEX refers to a constant number.
+ * 
+ * Currently available interrupts:
+ * - 0x0 - Writes to the ASCII video buffer; C translation:
+ *       - uint16_t video_vga(uint16_t i, uint16_t c);
  */
 
 #define RAM_MAXSIZE UINT16_MAX
+#define MAX_RAMSLOT 16
+
+struct ram{
+    byte memory[RAM_MAXSIZE];
+};
+
+/*
+ * Headers for a video, defining how it should be treated and used.
+ */
+enum video_header{
+    VIDEO_VGA = 0,  /* VGA-esque behavior. */
+
+    /* CURRENTLY UNIMPLEMENTED: */
+    VIDEO_GPH,      /* Graphical mode, supports RGBA pixels. */
+};
+
+struct video{
+    byte header;
+    byte *buffer;
+};
 
 struct  cpu_config{
     /*
-     * We currently only support one RAM. We also expect a ram that already has
+     * We now support more than one RAM. We also expect a ram that already has
      * instructions (16-bits aligned) within it starting from 0x0000.
      */
-    byte *ram;
-    uint16_t ram_size;
+    struct ram ram_slot[MAX_RAMSLOT];
+    uint8_t ram_count;
     /*
      * Our clock speed.
      */
     uint16_t clock_hz;
+    /*
+     * We currently only support VGA-esque display; we don't have real graphics.
+     * A buffer that holds ASCII characters.
+     */
+    struct video video;
 };
 
 void    cpu_init(struct cpu_config *config);
@@ -59,17 +91,6 @@ void    cpu_cycle(void);
 
 #define CPU_REGISTER_COUNT  4
 
-struct cpu_state{
-    uint16_t r[CPU_REGISTER_COUNT];
-    uint16_t pc;
-    uint16_t sp;
-    uint16_t flags;
-    uint16_t clock_hz;
-};
-
 void    cpu_printstate(void);
-
-#define MHZ 1000000
-#define cpu_microseconds_per_cycle(hz)  (MHZ / (hz))
 
 #endif /* CPU_H */

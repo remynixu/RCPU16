@@ -4,7 +4,14 @@
 
 
 
-static struct cpu_state cpu;
+
+static struct{
+    uint16_t r[CPU_REGISTER_COUNT];
+    uint16_t pc;
+    uint16_t sp;
+    uint16_t flags;
+    uint16_t clock_hz;
+}cpu;
 
 void cpu_printstate(void){
     int i;
@@ -25,6 +32,29 @@ void cpu_printstate(void){
 
 
 
+/* Video :< */
+static struct video video;
+
+static void video_irq(void){
+    switch(video.header){
+    case VIDEO_VGA:
+        /*
+         * C translation:
+         * uint16_t video_vga(uint16_t i, uint16_t c);
+         */
+        video.buffer[cpu.r[1]] = cpu.r[2];
+        break;
+    case VIDEO_GPH:
+        /* Not supported yet... */
+        break;
+    default:
+        /* INVALID!!! AAAAAA */
+        break;
+    }
+}
+
+
+
 /*
  * The current architecture of this CPU, the RCPU, is 16-bit RISC Big-endian.
  *
@@ -42,12 +72,8 @@ static void pc_increment(void){
 static uint16_t to_big_endian16(byte b1, byte b2){
     return (((uint16_t)b1 << 8) | (uint16_t)b2);
 }
-
 /* RAM!!! */
-static struct{
-    byte *memory;
-    uint16_t size;
-}ram;
+static struct ram ram;
 
 static uint16_t instr_fetch(void){
     return to_big_endian16(ram.memory[cpu.pc], ram.memory[cpu.pc + 1]);
@@ -119,10 +145,25 @@ INSTR_FN(handle_ldm){
         break;
     default:
         /* THIS IS AN INVALID OPCODE! WE MUST DIE! */
-        cpu.pc = ram.size * 2;
         break;
     }
     return 2;
+}
+
+INSTR_FN(handle_irq){
+    (void)opr0;
+    (void)opr1;
+    (void)opr2;
+    switch(cpu.r[0]){
+    /* instead of making a big switch block, soon it'll be a function table. */
+    case 0x0:
+        video_irq();
+        break;
+    default:
+        /* THIS IS AN INVALID REQUEST CODE! WE MUST DIE! */
+        break;
+    }
+    return 4;
 }
 
 instr_fn dispatch_table[16] = {
@@ -131,31 +172,35 @@ instr_fn dispatch_table[16] = {
     handle_ldu,
     handle_ldl,
     handle_ldm,
+    handle_irq,
     NULL
 };
 
 static int instr_decode(uint16_t instr){
     byte opc;
     byte opr[OPERAND_AMOUNT];
-    opc     = (instr >> 12) & 0xf;
-    opr[0]  = (instr >> 8) & 0xf;
-    opr[1]  = (instr >> 4) & 0xf;
-    opr[2]  = instr & 0xf;
+    opc    = (instr >> 12) & 0xf;
+    opr[0] = (instr >> 8) & 0xf;
+    opr[1] = (instr >> 4) & 0xf;
+    opr[2] = instr & 0xf;
     return dispatch_table[opc](opr[0], opr[1], opr[2]);
 }
 
 
 
 void cpu_init(struct cpu_config *config){
-    ram.memory   = config->ram;
-    ram.size     = config->ram_size;
     cpu.flags    = 0;
     cpu.pc       = 0;
     cpu.sp       = UINT16_MAX;
     cpu.clock_hz = config->clock_hz;
+    ram          = config->ram_slot[0];
+    video        = config->video;
 }
 
 #include <time.h>
+
+#define MHZ 1000000
+#define cpu_microseconds_per_cycle(hz)  (MHZ / (hz))
 
 static void delay_microseconds(int microseconds){
     clock_t target_ticks = clock() + (clock_t)((float)microseconds * ((float)CLOCKS_PER_SEC / (float)MHZ));
