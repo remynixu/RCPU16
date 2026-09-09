@@ -4,8 +4,8 @@
  * This header provides the functionality of an rcpu16 CPU, a dream CPU made by
  * remynixu: https://github.com/remynixu
  * 
- * This CPU is inspired by 16-bit RISC with Von Neumann architecture, though it
- * only has a single core.
+ * This emulated CPU is inspired by 16-bit RISC with Von Neumann architecture,
+ * though it only has a single core.
  */
 #define RCPU16_H
 
@@ -20,15 +20,13 @@
 #endif /* rcpu16_NULL */
 
 /*
- * Use the maximum value of an unsigned short as it is the maximum address a
- * 16-bit register can hold.
+ * The maximum address the RCPU can access.
  */
-#define RAM_BYTESIZE    (0xffff)
+#define rcpu16_MAXADDR  (unsigned short)(0xffff)
 
 /*
  * Configurations:
- * - memory - is expected to be the size of RAM_BYTESIZE.
- * - video  - explained in video.h in complete detail.
+ * - memory - is expected to be the size of rcpu16_MAXADDR.
  * 
  * Setting a member to zero or NULL will invoke the default behavior of that
  * member. Alternatively, passing NULL as argument will invoke all default
@@ -36,7 +34,6 @@
  */
 struct rcpu16_config{
     rcpu16_byte *memory;
-    rcpu16_byte *video;
 };
 
 /*
